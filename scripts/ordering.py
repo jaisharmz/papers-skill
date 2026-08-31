@@ -97,6 +97,7 @@ class Pick:
     conditioning: str               # why here, given everything before
     runners_up: list[tuple[str, float]] = field(default_factory=list)
     moved_for: str | None = None    # set when _place_disputes pulled this forward
+    seeded: bool = False            # position one, chosen by lookahead not greedily
     number: str = ""                # "3" on the spine, "3.2" inside a subgroup
     sub: object = None              # a Subgroup, or None
 
@@ -158,26 +159,61 @@ def marginal(item: Item, cov: dict[str, float],
     return gain, landed
 
 
-def available(item: Item, done: set[str]) -> bool:
-    """The hard gate. Prerequisites are satisfied or the item is worth zero here."""
-    return all(r in done for r in item.requires)
+# How much of an idea has to be covered before something that needs it unlocks.
+IDEA_MET = 0.5
 
 
-def _rate(item: Item, gain: float) -> float:
-    """Marginal value per hour, damped by whether the item rewards slow reading.
+def available(item: Item, done: set[str], cov: dict[str, float] | None = None) -> bool:
+    """The hard gate. Prerequisites are satisfied or the item is worth zero here.
+
+    A prerequisite is either an ITEM (read that first) or an IDEA (hold that
+    first). Both belong in `requires`, and the second is the more useful one: a
+    paper auditing whether the model helps needs the reader to know what the
+    model is, and which particular paper taught them that does not matter.
+
+    Checking only item ids made every idea prerequisite permanently unsatisfiable,
+    since `done` holds ids. The path silently halved and nothing said so.
+    """
+    cov = cov or {}
+    return all(r in done or cov.get(r, 0.0) >= IDEA_MET for r in item.requires)
+
+
+# The reader's constraint is over COUNT, not over hours: "if I read M of them,
+# those M should be the best M". Dividing by cost answers a different question,
+# "what are the best M hours", and the two disagree badly. A half-hour GitHub
+# thread scored 2.35 against Ha & Schmidhuber's 0.69 and took position two on a
+# path about world models, which is indefensible and is what this default fixes.
+#
+# Cost has not gone away. It bounds the path through `budget_hours`, it is
+# displayed on every row, and it breaks ties. It is no longer the ruler.
+BY_VALUE, BY_RATE = "value", "rate"
+
+
+def _value(item: Item, gain: float) -> float:
+    """What this item is worth, damped by whether it rewards slow reading.
 
     depth_payoff multiplies rather than adds, because a high-coverage item that
-    teaches nothing in depth is exactly the survey this skill exists to keep off
-    position one, and an additive term lets coverage outvote it.
+    teaches nothing in depth is the survey this skill exists to keep off position
+    one, and an additive term lets coverage outvote it.
     """
-    return (gain * (0.4 + 0.6 * item.depth_payoff)) / max(item.cost_hours, MIN_COST)
+    return gain * (0.4 + 0.6 * item.depth_payoff)
+
+
+def _rate(item: Item, gain: float, rule: str = BY_VALUE) -> float:
+    if rule == BY_RATE:
+        return _value(item, gain) / max(item.cost_hours, MIN_COST)
+    # Cost as a gentle tiebreak only: a fourth-root, so a 40-hour project is
+    # discounted against a 3-hour paper of equal value without a 30-minute
+    # artifact ever outranking a foundational text.
+    return _value(item, gain) / max(item.cost_hours, MIN_COST) ** 0.25
 
 
 def greedy(items, *, prior: dict[str, float] | None = None,
            weights: dict[str, float] | None = None,
            budget_hours: float | None = None,
            limit: int | None = None,
-           seed: str | None = None) -> list[Pick]:
+           seed: str | None = None,
+           rule: str = BY_VALUE) -> list[Pick]:
     """Take the best remaining item at each step, recompute, repeat."""
     pool = {it.id: it for it in items}
     cov = dict(prior or {})
@@ -190,12 +226,12 @@ def greedy(items, *, prior: dict[str, float] | None = None,
             break
         scored = []
         for it in pool.values():
-            if not available(it, done):
+            if not available(it, done, cov):
                 continue
             if budget_hours is not None and spent + it.cost_hours > budget_hours:
                 continue
             gain, landed = marginal(it, cov, weights, done)
-            scored.append((_rate(it, gain), gain, landed, it))
+            scored.append((_rate(it, gain, rule), gain, landed, it))
         if not scored:
             break
 
@@ -206,15 +242,15 @@ def greedy(items, *, prior: dict[str, float] | None = None,
         # so a zero-gain item that is the only thing standing between the path
         # and a positive-gain item takes that item's rate.
         blocked = [it for it in pool.values()
-                   if not available(it, done)
-                   and all(r in pool or r in done for r in it.requires)]
+                   if not available(it, done, cov)
+                   and all(r in pool or r in done or r in cov for r in it.requires)]
         if blocked:
             unlock: dict[str, float] = {}
             for it in blocked:
                 g, _ = marginal(it, cov, weights, done | set(it.requires))
                 if g <= 0:
                     continue
-                r = _rate(it, g)
+                r = _rate(it, g, rule)
                 for req in it.requires:
                     if req not in done:
                         unlock[req] = max(unlock.get(req, 0.0), r)
@@ -225,7 +261,8 @@ def greedy(items, *, prior: dict[str, float] | None = None,
                         _, g, landed, it = scored[by_id[req]]
                         scored[by_id[req]] = (r, max(g, 1e-9), landed, it)
 
-        if seed and not picks and seed in pool:
+        seeded_now = bool(seed) and not picks and seed in pool
+        if seeded_now:
             chosen = next(s for s in scored if s[3].id == seed)
         else:
             # Ties broken by raw gain then by id, so the order is reproducible.
@@ -239,7 +276,8 @@ def greedy(items, *, prior: dict[str, float] | None = None,
         picks.append(Pick(
             item=it, position=len(picks) + 1, marginal=round(gain, 4),
             rate=round(rate, 4), newly_covered=landed,
-            conditioning="", runners_up=[(o[3].id, round(o[0], 4)) for o in others]))
+            conditioning="", seeded=seeded_now,
+            runners_up=[(o[3].id, round(o[0], 4)) for o in others]))
         cov = coverage([it], cov)
         done.add(it.id)
         spent += it.cost_hours
@@ -317,7 +355,8 @@ def _place_disputes(picks: list[Pick]) -> list[Pick]:
     return [by_id[pid] for pid in order]
 
 
-def lookahead_seed(items, *, candidates, depth: int = 5, **kw) -> str | None:
+def lookahead_seed(items, *, candidates, depth: int = 5, foundational=None,
+                   **kw) -> str | None:
     """Position one decides what everything after it can be read as.
 
     Greedy would take the highest-coverage item, which is usually a survey or the
@@ -325,6 +364,22 @@ def lookahead_seed(items, *, candidates, depth: int = 5, **kw) -> str | None:
     something. So simulate a short path from each candidate seed and keep the one
     whose path is worth most, rather than the one that is worth most alone.
     """
+    # Candidates are filtered before they are simulated, not graded afterwards.
+    # A seed that cannot stand alone is not a seed however good its path is, and
+    # checking that only at the end left the run free to pick one and then fail.
+    by = {i.id: i for i in items}
+    if foundational:
+        ok = []
+        for cid in candidates:
+            it = by.get(cid)
+            if not it:
+                continue
+            probe = [Pick(item=it, position=1, marginal=1.0, rate=1.0,
+                          newly_covered=[], conditioning="", seeded=True)]
+            if not check_seed_stands_alone(probe, foundational):
+                ok.append(cid)
+        candidates = ok or candidates   # never return nothing; say so upstream
+
     best, best_score = None, -1.0
     for cid in candidates:
         path = greedy(items, seed=cid, limit=depth, **kw)
@@ -378,7 +433,8 @@ def _variant_gain(item: Item, idea: str, seen: set[str]) -> float:
 
 
 def subgroup_for(parent: Pick, pool, *, weights=None, prior=None,
-                 limit: int = 4) -> Subgroup | None:
+                 limit: int = 4, already: set | None = None,
+                 cov: dict | None = None) -> Subgroup | None:
     """Rank the approaches under one spine item. Same guarantee, one level down.
 
     Read k of these and they are approximately the best k approaches to this
@@ -390,12 +446,23 @@ def subgroup_for(parent: Pick, pool, *, weights=None, prior=None,
     # companions, weighted toward the one it opened. Using only the top-weighted
     # idea left an entry with obvious companions holding an empty group, because
     # its companions clustered on its second idea rather than its first.
+    already = already or set()
     order = [(parent.item.covers.get(i, 0.0) + 1.0, i)     # opened ideas first
              for i in (parent.newly_covered or [])]
     order += [(w, i) for i, w in _all_ideas(parent.item).items()]
     best = None
     for _, idea in sorted(order, reverse=True):
-        cands = [c for c in pool if _all_ideas(c).get(idea, 0.0) >= 0.3
+        # An item whose own prerequisites sit later on the spine cannot go in a
+        # subgroup here: the number is a route, and 10.2 must be reachable after
+        # 10. A project requiring something at position 25 landed at 10.2 before
+        # this guard, and check_prerequisites could not see it because it only
+        # walked the spine.
+        # `available`, not a set difference against item ids. A candidate whose
+        # prerequisite is an IDEA was excluded outright, which is the same bug the
+        # spine had, one level down: it dropped the model-helps dispute entirely.
+        cands = [c for c in pool
+                 if available(c, already, cov or {})
+                 and _all_ideas(c).get(idea, 0.0) >= 0.3
                  and c.variants.get(idea)
                  and c.variants.get(idea) != parent.item.variants.get(idea)]
         if cands and (best is None or len(cands) > len(best[1])):
@@ -412,8 +479,7 @@ def subgroup_for(parent: Pick, pool, *, weights=None, prior=None,
             g = _variant_gain(c, idea, seen)
             if g <= 0:
                 continue
-            scored.append(((g * (0.4 + 0.6 * c.depth_payoff)) /
-                           max(c.cost_hours, MIN_COST), g, c))
+            scored.append((_rate(c, g), g, c))
         if not scored:
             break
         rate, gain, c = max(scored, key=lambda s: (s[0], s[1], s[2].id))
@@ -501,7 +567,16 @@ def attach_subgroups(picks, items, *, weights=None, prior=None, limit: int = 4,
         p.number = str(n)
     for p in picks:
         mine = [c for c in pool if spine_ideas.get(_dominant(c, spine_ideas) or "") == p.item.id]
-        sg = subgroup_for(p, mine, weights=weights, prior=prior, limit=limit)
+        seen_ids = set()
+        for q in picks:
+            if q is p:
+                break
+            seen_ids.add(q.item.id)
+            if q.sub:
+                seen_ids.update(c.item.id for c in q.sub.picks)
+        upto = coverage([q.item for q in picks[:picks.index(p) + 1]], prior)
+        sg = subgroup_for(p, mine, weights=weights, prior=prior, limit=limit,
+                          already=seen_ids | {p.item.id}, cov=upto)
         if sg:
             p.sub = sg
             for c in sg.picks:
@@ -539,7 +614,8 @@ def attach_subgroups(picks, items, *, weights=None, prior=None, limit: int = 4,
                     if spine_ideas.get(_dominant(c, spine_ideas) or "") == q.item.id
                     or (_dominant(c, {i: q.item.id for i in q.item.covers}) is not None
                         and any(i in q.item.covers for i in c.covers))]
-            sg = subgroup_for(q, mine, weights=weights, prior=prior, limit=limit)
+            sg = subgroup_for(q, mine, weights=weights, prior=prior, limit=limit,
+                              cov=coverage([r.item for r in picks], prior))
             if sg:
                 q.sub = sg
                 for c in sg.picks:
@@ -578,7 +654,8 @@ def _placed(picks) -> set:
     return out
 
 
-def check_prefix_optimal(picks, items, *, prior=None, weights=None) -> list[str]:
+def check_prefix_optimal(picks, items, *, prior=None, weights=None,
+                        rule: str = BY_VALUE) -> list[str]:
     """The thesis, made checkable.
 
     For every prefix length M, swapping the item at position M for any item that
@@ -603,6 +680,12 @@ def check_prefix_optimal(picks, items, *, prior=None, weights=None) -> list[str]
     bad = []
     for m in range(1, len(picks) + 1):
         pk = picks[m - 1]
+        # Position one is exempt when it was seeded. lookahead_seed deliberately
+        # does NOT take the highest-value item: it takes the one whose whole path
+        # is worth most, because position one decides what the rest can be read
+        # as. Judging it by the greedy rule asks it to be something it is not.
+        if m == 1 and pk.seeded:
+            continue
         if pk.moved_for:
             prev = picks[m - 2].item.id if m >= 2 else None
             if pk.moved_for != prev or prev not in pk.item.disputes:
@@ -615,46 +698,63 @@ def check_prefix_optimal(picks, items, *, prior=None, weights=None) -> list[str]
         used = {p.item.id for p in picks}
         cur = picks[m - 1].item
         cur_gain, _ = marginal(cur, cov, weights, done)
-        cur_rate = _rate(cur, cur_gain)
+        cur_rate = _rate(cur, cur_gain, rule)
         for it in pool.values():
-            if it.id in used or it.id in placed or not available(it, done):
+            if it.id in used or it.id in placed or not available(it, done, cov):
                 continue
             gain, _ = marginal(it, cov, weights, done)
-            if _rate(it, gain) > cur_rate + 1e-9:
-                bad.append(f"position {m}: {it.id!r} rates {_rate(it, gain):.4f} "
+            if _rate(it, gain, rule) > cur_rate + 1e-9:
+                bad.append(f"position {m}: {it.id!r} rates {_rate(it, gain, rule):.4f} "
                            f"over {cur.id!r} at {cur_rate:.4f}")
     return bad
 
 
 def check_prerequisites(picks) -> list[str]:
-    seen, bad = set(), []
+    """Walk the path in the order a reader would follow it, subgroups included.
+
+    An earlier version walked only the spine, so an item filed at 10.2 whose
+    prerequisite sat at 25 passed. The number is a route: if it can be followed
+    in order, everything it needs has to already be behind it.
+    """
+    seen, bad, cov = set(), [], {}
     for p in picks:
-        missing = [r for r in p.item.requires if r not in seen]
-        if missing:
-            bad.append(f"position {p.position}: {p.item.id!r} requires {missing}, "
-                       "none of which appear earlier")
-        seen.add(p.item.id)
+        for c in [p] + list(p.sub.picks if p.sub else []):
+            missing = [r for r in c.item.requires
+                       if r not in seen and cov.get(r, 0.0) < IDEA_MET]
+            if missing:
+                bad.append(f"{c.number or c.position}: {c.item.id!r} requires "
+                           f"{missing}, none of which appear earlier")
+            seen.add(c.item.id)
+            # The reader holds everything above this line, ideas included, so the
+            # covered set has to advance with the walk. Without this the checker
+            # only ever saw item ids and every idea prerequisite read as unmet.
+            cov = coverage([c.item], cov)
     return bad
 
 
 def check_compounding(picks) -> list[str]:
     """Projects after the first name what they reuse, and it is genuinely earlier.
 
-    plan.md §7 claims a project sequence beats three good projects because the
+    plan.md 7 claims a project sequence beats three good projects because the
     artifacts compound. This is that claim turned into something that fails.
+
+    Walks subgroups too: a project filed at 10.2 is still a project, and the
+    reader reaches it before the one at 25.
     """
     seen, bad, nth = set(), [], 0
-    for p in picks:
-        if p.item.kind == "project":
-            nth += 1
-            if nth > 1 and not p.item.reuses:
-                bad.append(f"position {p.position}: project {p.item.id!r} reuses nothing "
-                           "from earlier, so the sequence is not compounding")
-            for r in p.item.reuses:
-                if r not in seen:
-                    bad.append(f"position {p.position}: {p.item.id!r} claims to reuse "
-                               f"{r!r}, which is not earlier in the path")
-        seen.add(p.item.id)
+    for top in picks:
+        for p in [top] + list(top.sub.picks if top.sub else []):
+            n = p.number or p.position
+            if p.item.kind == "project":
+                nth += 1
+                if nth > 1 and not p.item.reuses:
+                    bad.append(f"{n}: project {p.item.id!r} reuses nothing from "
+                               "earlier, so the sequence is not compounding")
+                for r in p.item.reuses:
+                    if r not in seen:
+                        bad.append(f"{n}: {p.item.id!r} claims to reuse {r!r}, "
+                                   "which is not earlier in the path")
+            seen.add(p.item.id)
     return bad
 
 
@@ -716,6 +816,40 @@ def check_subgroups(picks, items) -> list[str]:
     return bad
 
 
+def check_seed_stands_alone(picks, ideas: dict | None = None) -> list[str]:
+    """If someone reads exactly one thing, it has to be a thing worth reading alone.
+
+    The failure this exists to stop, in full: a run about world models opened with
+    a 2023 analysis of MuZero's learned model and followed it with a GitHub thread
+    about a library version. Both are good artifacts and neither answers "what is
+    a world model", so a reader who stopped at one or two came away with nothing.
+
+    Two conditions on position one. It needs no prerequisites, since anything you
+    must read first is by definition a better position one. And it covers at least
+    one idea marked foundational, meaning the field is not legible without it.
+    """
+    if not picks:
+        return ["the path is empty"]
+    ideas = ideas or {}
+    p = picks[0]
+    bad = []
+    if p.item.requires:
+        bad.append(f"position one {p.item.id!r} requires {p.item.requires}, so one of "
+                   "those is the better position one")
+    found = {k for k, v in ideas.items() if v}
+    if found:
+        hit = found & set(_all_ideas(p.item))
+        if not hit:
+            bad.append(f"position one {p.item.id!r} covers no foundational idea "
+                       f"({', '.join(sorted(found))}), so a reader who stops here "
+                       "learns something true about a corner of the field and "
+                       "nothing about the field")
+    if p.item.kind != "paper":
+        bad.append(f"position one is a {p.item.kind}, and the reader asked for the "
+                   "best M papers")
+    return bad
+
+
 def check_display_fields(picks) -> list[str]:
     """Year and phrase on every entry, at every depth.
 
@@ -736,7 +870,7 @@ def check_display_fields(picks) -> list[str]:
     return bad
 
 
-def check_all(picks, items, **kw) -> dict[str, list[str]]:
+def check_all(picks, items, foundational: dict | None = None, **kw) -> dict[str, list[str]]:
     return {
         "monotone": check_monotone(picks),
         "prefix_optimal": check_prefix_optimal(picks, items, **kw),
@@ -744,6 +878,7 @@ def check_all(picks, items, **kw) -> dict[str, list[str]]:
         "compounding": check_compounding(picks),
         "unique_coverers": check_unique_coverers(picks, items, **kw),
         "subgroups": check_subgroups(picks, items),
+        "seed_stands_alone": check_seed_stands_alone(picks, foundational),
         "display_fields": check_display_fields(picks),
     }
 

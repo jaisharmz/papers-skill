@@ -192,6 +192,12 @@ def check(path: pathlib.Path) -> list[Finding]:
     nested_a = re.findall(r"<a\b[^>]*>(?:(?!</a>).)*<a\b", body, re.S)
     if nested_a:
         problems.append(f"{len(nested_a)} nested <a> elements, which browsers unnest")
+    for name, sel in (("runbar", r'<div class="runbar">(.*?)</div>'),
+                      ("verdict", r'<p class="verdict">(.*?)</p>')):
+        m = re.search(sel, body, re.S)
+        if m is not None and not re.sub(r"<[^>]+>|\s", "", m.group(1)):
+            problems.append(f"the {name} rendered empty, which usually means a "
+                            "variable holding its contents was shadowed")
     if body.count("<h1") != 1:
         problems.append(f"{body.count('<h1')} <h1> elements, expected exactly 1")
     out.append(_f("structure", FAIL if problems else OK, "; ".join(problems)))
@@ -290,7 +296,11 @@ def check(path: pathlib.Path) -> list[Finding]:
     gaps = []
     if rows and nophrase:
         gaps.append(f"{nophrase} of {len(rows)} rows show no phrase")
-    if rows and noyear > sum(1 for r in rows if 'chip project' in r):
+    # Projects legitimately have no year. The kind used to be a chip and is now a
+    # colour rail driven by data-track, so the old test looked for markup that no
+    # longer exists and started counting projects as failures.
+    if rows and noyear > sum(1 for r in re.findall(
+            r'<li id="e-[^"]*"[^>]*data-track="project"', body) for _ in "1"):
         gaps.append(f"{noyear} of {len(rows)} rows show no year")
     out.append(_f("every row shows a year and a phrase", FAIL if gaps else OK,
                   "; ".join(gaps)))

@@ -197,7 +197,7 @@ def check_group_theses(groups) -> Check:
     gets null, with a reason about the run, and those two are not the same and
     must not read the same.
     """
-    placeholders, unsourced = [], []
+    placeholders, unsourced, unvisited = [], [], []
     for g in groups:
         t = g.get("thesis")
         why = g.get("thesis_none_why") or ""
@@ -205,6 +205,12 @@ def check_group_theses(groups) -> Check:
             placeholders.append(g.get("slug"))
         elif t and not g.get("thesis_source"):
             unsourced.append(g.get("slug"))
+        elif not t and g.get("resolved") is False:
+            # An unvisited group is not a placeholder, it is a known blank. What
+            # groups.md forbids is a group nobody looked at reading the same as a
+            # group that genuinely has no through line, and `resolved: false`
+            # keeps those apart without asking a regex to infer it from prose.
+            unvisited.append(g.get("slug"))
         elif not t and PLACEHOLDER.search(why):
             placeholders.append(f"{g.get('slug')} (nobody looked)")
     out = []
@@ -215,9 +221,11 @@ def check_group_theses(groups) -> Check:
     if out:
         return _c("group theses are real or honestly null", FAIL,
                   ", ".join(out), placeholders + unsourced, "groups.md")
-    n_none = sum(1 for g in groups if not g.get("thesis"))
-    return _c("group theses are real or honestly null", OK,
-              f"{len(groups)} groups, {n_none} with thesis: none", source="groups.md")
+    n_none = sum(1 for g in groups if not g.get("thesis") and g.get("resolved") is not False)
+    d = f"{len(groups)} groups, {n_none} with thesis: none"
+    if unvisited:
+        d += f", {len(unvisited)} not investigated in this run"
+    return _c("group theses are real or honestly null", OK, d, source="groups.md")
 
 
 def check_group_links(groups, entries) -> Check:
@@ -301,6 +309,42 @@ def check_uniformity(entries) -> Check:
 # --------------------------------------------------------------- honesty checks
 
 
+# Second person is normal technical writing ("you can skip section 4"). What a
+# default run must not do is address a PARTICULAR reader: their history, their
+# folder, their background. That is the difference between a page you can send to
+# a colleague and one you cannot.
+PERSONAL = re.compile(
+    r"\byour reading (?:log|folder|list)\b|\byou have (?:already )?read\b"
+    r"|\byour (?:profile|background|prior work|own reading)\b"
+    r"|\bsince you (?:know|have|already)\b|\bin your folder\b"
+    r"|\byou finished\b|\byou reimplemented\b|\byou already know\b", re.I)
+
+
+def check_impersonal(d, personalized: bool) -> Check:
+    """A default run says nothing about who is reading it.
+
+    A path built around one person's history is a worse artifact for everyone
+    else, and slightly odd even for its owner, who did not ask a page about a
+    field to remind them what they have read.
+    """
+    # One name in both branches. A check whose rule name changes with its own
+    # outcome cannot be looked up by callers, and the test caught exactly that.
+    RULE = "a default run addresses no particular reader"
+    if personalized:
+        return _c(RULE, OK, "personalized run, so this does not apply",
+                  source="SKILL.md step 1")
+    hits = []
+    for e in flatten(d.get("entries", [])):
+        for k in ("summary", "unlocks", "conditioning", "where_the_thinking_is", "question"):
+            if PERSONAL.search(str(e.get(k) or "")):
+                hits.append(f"{num(e)}.{k}")
+    if PERSONAL.search(str((d.get("meta") or {}).get("opening") or "")):
+        hits.append("meta.opening")
+    return _c(RULE, FAIL if hits else OK,
+              f"{len(hits)} references to the reader's own history", hits,
+              "SKILL.md step 1")
+
+
 def check_unverified_not_empty(conf) -> Check:
     """sourcing.md: an empty could-not-verify list means somebody quietly dropped
     what they were unsure about."""
@@ -359,10 +403,12 @@ def check_experiential(d) -> Check:
 # --------------------------------------------------------------- driver
 
 
-def critique(run_dir: pathlib.Path, deep_terms=()) -> list[Check]:
+def critique(run_dir: pathlib.Path, deep_terms=(), personalized=None) -> list[Check]:
     d = json.load(open(run_dir / "path.json"))
     entries, groups = d.get("entries", []), d.get("groups", [])
     flat = flatten(entries)
+    if personalized is None:
+        personalized = bool((d.get("meta") or {}).get("personalized"))
     checks = [
         check_layer_three(flat),
         check_repo_entries(flat),
@@ -375,12 +421,28 @@ def critique(run_dir: pathlib.Path, deep_terms=()) -> list[Check]:
         check_interleaved(entries),
         check_experiential(d),
         check_uniformity(entries),
+        check_impersonal(d, personalized),
         check_unverified_not_empty(d.get("confidence")),
         check_anchoring(d, deep_terms),
     ]
     prose = " ".join(str(e.get(k) or "") for e in flat
                      for k in ("summary", "unlocks", "where_the_thinking_is",
                                "conditioning", "question"))
+    # The deslop layer runs here too, so `critique` alone covers a whole run.
+    # It is a separate module because a title is worth checking on its own.
+    #
+    # Loaded by path, not by package name. `scripts` is a package name three
+    # skills in this directory share, so a plain `from scripts import deslop`
+    # resolves to whichever one is on sys.path first, which is not this one.
+    from importlib.machinery import SourceFileLoader
+    deslop = SourceFileLoader(
+        "papers_deslop",
+        str(pathlib.Path(__file__).resolve().parent / "deslop.py")).load_module()
+    for f in deslop.deslop(d):
+        checks.append(_c(f"deslop: {f.rule}",
+                         {deslop.FAIL: FAIL, deslop.WARN: WARN, deslop.OK: OK}[f.status],
+                         f.detail, f.hits, "deslop.py"))
+
     checks += check_voice(prose, "entries")
     checks += check_voice(" ".join(str(g.get("thesis") or "") + " " +
                                    str(g.get("direction") or "") for g in groups), "groups")

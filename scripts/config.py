@@ -45,13 +45,30 @@ def profile_path() -> pathlib.Path | None:
     return None
 
 
-def reading_log() -> pathlib.Path | None:
+# Personalization is OPT-IN. A path built for one person's history is a worse
+# artifact for everyone else and a slightly odd one even for its owner, who did
+# not ask to be reminded what they have read on a page about a field. The default
+# run knows nothing about the reader; `--me` turns the profile on.
+PERSONAL_FLAGS = ("--me", "--personal", "--profile")
+
+
+def personalized(args: str | list | None) -> bool:
+    argv = args.split() if isinstance(args, str) else list(args or [])
+    return any(a in PERSONAL_FLAGS or a.startswith("--profile=") for a in argv)
+
+
+def reading_log(personal: bool = True) -> pathlib.Path | None:
     """The folder of things already read, from the profile's front matter.
 
     Returns None rather than a guess. An invented path silently yields an empty
     covered set, and the run then re-recommends the canon the reader finished
     years ago, which is the fastest way for the output to lose them.
+
+    Returns None unconditionally when the run is not personalized, so the covered
+    set starts empty and the path is the one a stranger to the field should read.
     """
+    if not personal:
+        return None
     p = profile_path()
     if not p:
         return None
@@ -62,9 +79,10 @@ def reading_log() -> pathlib.Path | None:
     return d if d.exists() else None
 
 
-def describe() -> dict:
-    p, r = profile_path(), reading_log()
-    return {"profile": str(p) if p else None,
+def describe(personal: bool = True) -> dict:
+    p, r = profile_path(), reading_log(personal)
+    return {"personalized": personal,
+            "profile": str(p) if p and personal else None,
             "reading_log": str(r) if r else None,
             "graph_db": str(GRAPH_DB), "cache": str(CACHE_DIR),
             "searched": [str(pathlib.Path(c).expanduser()) for c in CANDIDATES if c]}

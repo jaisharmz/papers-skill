@@ -14,12 +14,15 @@ from scripts import ordering as S
 from tests.fixtures.toy import ITEMS, IDEA_WEIGHTS
 
 KW = dict(weights=IDEA_WEIGHTS)
+# "the objective this subfield optimizes" is the idea without which nothing else
+# on this path is legible, so it is what position one has to touch.
+FOUNDATIONAL = {"i_obj": True}
 
 
 @pytest.fixture
 def picks():
     seed = S.lookahead_seed(ITEMS, candidates=["survey", "seminal", "bench", "pos_a"],
-                            depth=5, **KW)
+                            depth=5, foundational=FOUNDATIONAL, **KW)
     return S.attach_subgroups(S.greedy(ITEMS, seed=seed, **KW), ITEMS, **KW)
 
 
@@ -29,8 +32,15 @@ def test_every_invariant_holds_on_a_realistic_path(picks):
     Kills: coverage summing instead of taking the best, the prerequisite gate
     opening, recompute not updating between picks, stranded items surviving.
     """
-    failures = {k: v for k, v in S.check_all(picks, ITEMS, **KW).items() if v}
+    failures = {k: v for k, v in
+                S.check_all(picks, ITEMS, foundational=FOUNDATIONAL, **KW).items() if v}
     assert not failures, failures
+
+
+def test_a_seed_that_cannot_stand_alone_is_never_simulated():
+    """Filtering candidates before the lookahead, not grading the winner after."""
+    assert S.lookahead_seed(ITEMS, candidates=["bench", "seminal"], depth=4,
+                            foundational=FOUNDATIONAL, **KW) == "seminal"
 
 
 def test_position_one_is_chosen_for_its_path_not_its_own_value():
@@ -155,8 +165,11 @@ def test_nothing_selected_is_ever_lost_between_the_spine_and_the_groups():
     # variant so no subgroup will take it either. That is the exact shape that
     # fell out of both places. Earlier fixtures had nothing in this state, so the
     # test passed without reaching the code it names.
+    # `orphan` must be SELECTED (positive marginal) and then demoted (opens no
+    # new idea) and then homeless (no variant label). Under the value rule that
+    # means covering an idea partially, not covering it cheaply.
     items = _deep() + [S.Item(id="orphan", kind="paper", title="orphan",
-                              covers={"else": .45}, cost_hours=1, depth_payoff=.95,
+                              covers={"else": .95}, cost_hours=2, depth_payoff=.95,
                               year=2022, phrase="deepens the other idea")]
     selected = {p.item.id for p in S.greedy(items)}
     assert "orphan" in selected, "fixture no longer exercises demotion"
@@ -290,3 +303,73 @@ def test_a_subgroup_forms_on_whichever_idea_has_companions():
 
 def test_a_budget_bounds_the_path():
     assert sum(p.item.cost_hours for p in S.greedy(ITEMS, budget_hours=6, **KW)) <= 6
+
+
+def test_position_one_must_stand_alone():
+    """The failure the reader caught: a path about world models opened with an
+    analysis of one system's learned model and followed it with a GitHub thread
+    about a library version. Neither answers "what is a world model"."""
+    found = {"i_obj": True}
+    seminal = next(i for i in ITEMS if i.id == "seminal")     # covers i_obj
+    bench = next(i for i in ITEMS if i.id == "bench")         # covers only i_bench
+    ok = [S.Pick(item=seminal, position=1, marginal=1, rate=1, newly_covered=["i_obj"],
+                 conditioning="", seeded=True)]
+    assert not S.check_seed_stands_alone(ok, found)
+    bad = [S.Pick(item=bench, position=1, marginal=1, rate=1, newly_covered=["i_bench"],
+                  conditioning="", seeded=True)]
+    msgs = S.check_seed_stands_alone(bad, found)
+    assert msgs and "foundational" in msgs[0]
+
+
+def test_position_one_may_not_be_a_repo_or_a_project():
+    """"the best M papers" is what was asked for. A GitHub issue thread at two is
+    the same error one position later."""
+    repo = S.Item(id="r", kind="repo", title="o/r", covers={"i_obj": .9},
+                  cost_hours=.5, phrase="a thread")
+    msgs = S.check_seed_stands_alone(
+        [S.Pick(item=repo, position=1, marginal=1, rate=1, newly_covered=["i_obj"],
+                conditioning="", seeded=True)], {"i_obj": True})
+    assert any("best M papers" in m for m in msgs)
+
+
+def test_position_one_may_not_have_prerequisites():
+    it = S.Item(id="x", kind="paper", title="X", covers={"i_obj": .9},
+                requires=["y"], cost_hours=2, phrase="needs something first")
+    msgs = S.check_seed_stands_alone(
+        [S.Pick(item=it, position=1, marginal=1, rate=1, newly_covered=["i_obj"],
+                conditioning="", seeded=True)], {"i_obj": True})
+    assert any("better position one" in m for m in msgs)
+
+
+def test_an_idea_prerequisite_unlocks_when_the_idea_is_covered():
+    """A prerequisite is either an item or an IDEA. Checking only item ids made
+    every idea prerequisite permanently unsatisfiable, and a real path silently
+    halved with nothing saying so."""
+    base = S.Item(id="base", kind="paper", title="base", covers={"i_what": .9},
+                  cost_hours=2, depth_payoff=.9, year=2018, phrase="defines the thing")
+    needs = S.Item(id="needs", kind="paper", title="needs", covers={"i_audit": .9},
+                   requires=["i_what"], cost_hours=2, depth_payoff=.9, year=2023,
+                   phrase="audits the thing")
+    assert not S.available(needs, set(), {})
+    assert not S.available(needs, set(), {"i_what": 0.2})
+    assert S.available(needs, set(), {"i_what": 0.9})
+    order = [p.item.id for p in S.greedy([needs, base])]
+    assert order == ["base", "needs"], order
+    assert not S.check_prerequisites(S.greedy([needs, base]))
+
+
+def test_a_subgroup_candidate_gated_by_an_idea_is_not_excluded():
+    """Same bug as the spine had, one level down: subgroup candidacy compared
+    `requires` against item ids, so anything needing an IDEA was dropped outright.
+    It cost a real run its cleanest dispute."""
+    base = S.Item(id="base", kind="paper", title="base", covers={"i_what": .9},
+                  cost_hours=2, depth_payoff=.9, year=2018, phrase="defines it")
+    parent = S.Item(id="parent", kind="paper", title="parent", covers={"arg": .5},
+                    variants={"arg": "one framing"}, requires=["i_what"],
+                    cost_hours=2, depth_payoff=.9, year=2023, phrase="one side")
+    side = S.Item(id="side", kind="paper", title="side", covers={"arg": .45},
+                  variants={"arg": "the other framing"}, requires=["i_what"],
+                  cost_hours=2, depth_payoff=.85, year=2024, phrase="the other side")
+    items = [base, parent, side]
+    picks = S.attach_subgroups(S.greedy(items), items)
+    assert "side" in S._placed(picks), "an idea-gated candidate must still be reachable"

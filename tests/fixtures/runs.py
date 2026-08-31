@@ -5,6 +5,8 @@ is a regression fixture rather than an invented one.
 """
 
 GOOD = {
+  "meta": {"title": "Masked diffusion",
+           "opening": "Three steps into masked diffusion language models."},
   "entries": [
     {"position":1,"id":"a","kind":"paper","group":"g1","title":"A",
      "summary":"Argues the objective decomposes over orderings, which reframes the model class as any-order autoregressive rather than a separate family with its own theory.",
@@ -30,6 +32,7 @@ GOOD = {
   "confidence":{"unverified":["one affiliation could not be dated"]}}
 
 BAD = {
+  "meta": {"title": "Masked diffusion, after the objective stops mattering"},
   "entries": [
     {"position":1,"id":"a","kind":"paper","group":"ghost","title":"A",
      "summary":"This document explores a robust framework.","unlocks":"x",

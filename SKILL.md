@@ -1,7 +1,7 @@
 ---
 name: papers
 description: Build one ordered path of papers, code repositories and projects for getting deep into a topic, where reading only the first M of them is approximately the best M you could have picked. Every entry says where the thinking actually is, which lab it came from and what that lab believes. Use when the user runs /papers <topic|person|lab|company|artifact>, or asks what to read about a field, which repo to learn something from, what to build to understand an area, or who is working on it.
-argument-hint: <topic | person | lab | company | "the lab that made X"> [--quick|--deep] [--only papers|repos|projects] [--hours N] [--follow]
+argument-hint: <topic | person | lab | company | "the lab that made X"> [--me] [--quick|--deep] [--only papers|repos|projects] [--hours N] [--follow]
 user-invocable: true
 ---
 
@@ -91,17 +91,26 @@ rather than guessing a path: an invented reading log silently yields an empty co
 run then re-recommends the canon the reader finished years ago. The anti-anchoring rule from that skill applies here with more
 force, because a reading path is where familiar vocabulary leaks in most easily.
 
-## Step 1: Seed the covered set from what they have read
+## Step 1: Personalization, which is off unless asked for
+
+**The default run knows nothing about the reader.** No profile, no reading log, no covered set.
+It builds the path a person entering this field should read, and it is the same path for everyone,
+which is what makes it worth sending to someone else.
+
+`--me` turns the profile on. Only then:
 
 Call `scripts/readlog.py` on `profile.reading_log`. The result is **the initial state of the
 selection, not an exclusion list.** A paper already read has covered its share, so the path starts
-where their knowledge stops.
-
-On `protein folding` this is most of the value: AlphaFold 2 and 3 and Boltz are in the folder, so
-position one is neither AlphaFold 2 nor "AlphaFold 2, skipped."
+where their knowledge stops. On `protein folding` this is most of the value: AlphaFold 2 and 3 and
+Boltz are in the folder, so position one is neither AlphaFold 2 nor "AlphaFold 2, skipped."
 
 Report what failed to resolve rather than dropping it. A silently dropped paper reappears on the
 path, and recommending something they finished last year is the fastest way to lose their trust.
+
+**In a default run the output says nothing about the reader.** No "your reading log", no "you have
+already read", no register tuned to one person's depth. Write for someone who wants to understand
+the field. `scripts/critique.py` fails a default run that addresses a particular reader, because
+that is the difference between a page you can send to a colleague and a page you cannot.
 
 ## Step 2: Traverse
 
@@ -169,6 +178,20 @@ entry that was a bare URL, three placeholder group theses and three dangling gro
 only caught two of those by eye. A run with blocking failures does not ship. The checks it
 cannot make mechanically it reports as `look` rather than scoring, since a reading problem given
 a threshold returns a confident wrong answer instead of an error.
+
+**Then run `python3 scripts/deslop.py <run-dir>` and fix what it fails.** It is the last gate and
+it catches what `voice.md` and the editor pass leave behind: the constructions that are each
+defensible and collectively unmistakable. Two things it looks at.
+
+The **title**, harder than anything else, because six words carry the whole first impression. The
+shape that gives it away is a noun phrase followed by a portentous clause that reframes it, as in
+"World models, after the score stops meaning anything". It sounds like a thesis and states nothing,
+and nobody names a document that way for a colleague. A plain noun phrase is almost always right:
+the page is called "World models" and the argument goes in the opening.
+
+Everything else as a **density budget rather than a ban**. "Rather than" is a fine phrase and
+seventeen of them in five thousand words is a tic. Every budget in that file was set by measuring
+this skill's own output, and the counts that set them are in its comments.
 
 Then the page via `scripts/build_page.py`, and **then `python3 scripts/checkpage.py <run-dir>/report.html`**.
 That one is not optional either. `build_page.py` only ever checked tag balance and em dashes,

@@ -152,3 +152,58 @@ def test_a_control_with_no_handler_and_a_handler_with_no_control_are_both_caught
              js='document.querySelector(".depthtoggle");'
                 'document.querySelectorAll("details.subs")')
     assert ok[RULE].status == C.OK, ok[RULE].items
+
+
+def test_the_lineage_names_entries_that_live_in_subgroups(tmp_path):
+    """Building the name map from the spine alone made every lineage row that
+    referenced a sub-entry fall back to its raw item id."""
+    body = ('<article data-id="a"></article>'
+            '<details class="subs"><summary><span class="subn">1</span> more</summary>'
+            '<ol class="spine"><li id="e-b" data-id="b" data-sub=1>'
+            '<span class="t"><a href="#">Title B</a></span></li></ol></details>'
+            '<ul class="lineage"><li>Title A disputes Title B</li></ul>')
+    assert run(tmp_path, body=body)[
+        "no internal identifiers in generated relation lists"].status == C.OK
+    bad = ('<article data-id="a"></article><article data-id="b"></article>'
+           '<ul class="lineage"><li>a disputes b</li></ul>')
+    assert run(tmp_path, body=bad)[
+        "no internal identifiers in generated relation lists"].status == C.FAIL
+
+
+def test_a_section_that_renders_empty_is_caught(tmp_path):
+    """The runbar emptied because a later variable reused its name. The page
+    built, looked plausible, and passed every other check."""
+    assert run(tmp_path, body='<div class="runbar"></div>')["structure"].status == C.FAIL
+    assert run(tmp_path, body='<div class="runbar"><span>query</span></div>'
+               )["structure"].status == C.OK
+
+
+def test_a_feature_hint_may_not_promise_what_it_cannot_deliver(tmp_path):
+    """The keyboard shortcuts only reach a sandboxed artifact once the iframe has
+    focus. Shipping a visible hint for them promised something the page could not
+    keep, and the reader reported it. The hint now starts hidden and is revealed
+    by an actual keydown."""
+    html = (tmp_path / "report.html")
+    html.write_text(SHELL.format(
+        css=".keys{}", body='<p class="keys" hidden>j k move</p>',
+        js='function keysAreLive(){document.querySelector(".keys").hidden=false;}'
+           'document.addEventListener("keydown", keysAreLive);'))
+    src = html.read_text()
+    assert 'class="keys" hidden' in src, "the hint must not be visible before it works"
+    assert "keysAreLive" in src, "and something must be able to reveal it"
+
+
+def test_a_throttled_count_is_never_rendered_as_zero(tmp_path):
+    """78 of 88 came back "no public repos" once and it was a rate limit. A page
+    that prints 0 stars for a throttled read has invented a finding."""
+    import json as _j
+    from scripts import build_page as B
+    assert "0" not in B.counts({"stars": {"value": None, "note": "throttled",
+                                          "read_on": "2026-08-26", "source": "github"}})
+    assert "unread" in B.counts({"stars": {"value": None, "note": "throttled",
+                                           "read_on": "2026-08-26", "source": "github"}})
+    assert "too new" in B.counts({"citations": {"value": None, "note": "too new to cite",
+                                                "read_on": "2026-08-26", "source": "openalex"}})
+    rendered = B.counts({"citations": {"value": 182, "note": "", "read_on": "2026-08-26",
+                                       "source": "openalex"}})
+    assert "182 cited" in rendered and "2026-08-26" in rendered, "a count needs its date"

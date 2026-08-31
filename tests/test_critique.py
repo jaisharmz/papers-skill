@@ -110,3 +110,27 @@ def test_anchoring_reports_rather_than_scores(tmp_path):
     c = by_rule(C.critique(tmp_path, deep_terms=["orderings"]))["anti-anchoring sweep"]
     assert c.status in (C.OK, C.LOOK)
     assert c.status != C.FAIL
+
+
+def test_a_default_run_may_not_address_a_particular_reader(tmp_path):
+    """A path built around one person's history is a worse artifact for everyone
+    else, and it is the difference between a page you can send to a colleague and
+    one you cannot."""
+    RULE = "a default run addresses no particular reader"
+    d = json.loads(json.dumps(GOOD))
+    d["entries"][0]["conditioning"] = "Position one because you have already read DreamerV3."
+    (tmp_path / "path.json").write_text(json.dumps(d))
+    assert by_rule(C.critique(tmp_path, personalized=False))[RULE].status == C.FAIL
+    assert by_rule(C.critique(tmp_path, personalized=True))[RULE].status == C.OK
+    (tmp_path / "path.json").write_text(json.dumps(GOOD))
+    assert by_rule(C.critique(tmp_path, personalized=False))[RULE].status == C.OK
+
+
+def test_ordinary_second_person_is_not_flagged(tmp_path):
+    """"you can skip section 4" is normal technical writing. A check that fails it
+    would make every path unwritable."""
+    d = json.loads(json.dumps(GOOD))
+    d["entries"][0]["summary"] = "You can skip section 4; read table 3 instead."
+    (tmp_path / "path.json").write_text(json.dumps(d))
+    assert by_rule(C.critique(tmp_path, personalized=False))[
+        "a default run addresses no particular reader"].status == C.OK

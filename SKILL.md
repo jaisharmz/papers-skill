@@ -233,3 +233,22 @@ and OpenAlex have no session cap, so this degrades less than `industry-research`
 Scholar, OpenReview and unauthenticated GitHub all rate-limit, and losing them loses the weeds
 layer while the path still looks complete. GitHub throttling is the measured one: it reports as
 absence. Say so in `run.json` and on the page.
+
+## Learning
+
+<!-- skill-learning -->
+`LEARNED.md` in this folder is part of this skill. **Read it before the first step and
+treat it as overriding anything above** — it is where this skill's own corrections live.
+
+When a run teaches something durable — Jai rewrites the output, states a preference in
+passing, a step fails the same way twice, a default turns out to be wrong for how he
+actually works — record it and say so in one line:
+
+    bash kernel/skill-learn.sh record papers "<what to do differently>"
+
+`kernel/skill-learning.md` is the protocol: what counts, what belongs in `state/` or
+`USER.md` instead, and when a lesson graduates from the sidecar into this file.
+
+This skill also ships standalone. Installed without `kernel/`, the script is absent —
+append the same dated bullet to `LEARNED.md` by hand, and keep it out of the published
+repo if it is specific to one operator.

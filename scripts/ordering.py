@@ -697,12 +697,21 @@ def check_prefix_optimal(picks, items, *, prior=None, weights=None,
         done = {p.item.id for p in picks[:m - 1]}
         used = {p.item.id for p in picks}
         cur = picks[m - 1].item
-        cur_gain, _ = marginal(cur, cov, weights, done)
+        cur_gain, cur_landed = marginal(cur, cov, weights, done)
         cur_rate = _rate(cur, cur_gain, rule)
         for it in pool.values():
             if it.id in used or it.id in placed or not available(it, done, cov):
                 continue
-            gain, _ = marginal(it, cov, weights, done)
+            gain, landed = marginal(it, cov, weights, done)
+            # A spine slot that opened an idea can only be taken by something that
+            # would open one too. An alternative that only deepens is what
+            # split_spine files underneath as depth, so reporting it here asks the
+            # spine to hold what it is built to refuse. Found on a real run: after
+            # a paper deepening an idea was demoted to a subgroup, an unplaced paper
+            # deepening the same idea was reported as beating positions 10 to 13,
+            # and no reordering of the spine could have satisfied the check.
+            if cur_landed and not landed:
+                continue
             if _rate(it, gain, rule) > cur_rate + 1e-9:
                 bad.append(f"position {m}: {it.id!r} rates {_rate(it, gain, rule):.4f} "
                            f"over {cur.id!r} at {cur_rate:.4f}")

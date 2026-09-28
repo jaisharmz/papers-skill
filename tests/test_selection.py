@@ -373,3 +373,28 @@ def test_a_subgroup_candidate_gated_by_an_idea_is_not_excluded():
     items = [base, parent, side]
     picks = S.attach_subgroups(S.greedy(items), items)
     assert "side" in S._placed(picks), "an idea-gated candidate must still be reachable"
+
+
+def test_the_prefix_check_only_offers_the_spine_things_it_would_keep():
+    """A deepening-only alternative is depth, not a better spine item.
+
+    Regression from a real run: once a paper that only deepened an idea was filed
+    in a subgroup, an unplaced paper deepening the same idea was reported as beating
+    later spine positions, although split_spine would have demoted it too. An
+    alternative that opens a NEW idea at a higher rate must still be reported.
+    """
+    opener = S.Item(id="opener", kind="paper", title="O", year=2024, phrase="opens a and b",
+                    covers={"a": .3, "b": .9}, depth_payoff=.8, cost_hours=1)
+    later = S.Item(id="later", kind="paper", title="L", year=2024, phrase="opens c",
+                   covers={"c": .4}, depth_payoff=.5, cost_hours=1)
+    deepen = S.Item(id="deepen", kind="paper", title="D", year=2024, phrase="deepens a",
+                    covers={"a": .8}, depth_payoff=.8, cost_hours=1)
+    spine = [S.Pick(item=opener, position=1, marginal=1.2, rate=1.0, newly_covered=["a", "b"],
+                    conditioning="", seeded=True, number="1"),
+             S.Pick(item=later, position=2, marginal=.4, rate=.3, newly_covered=["c"],
+                    conditioning="", number="2")]
+    assert S.check_prefix_optimal(spine, [opener, later, deepen]) == []
+    rival = S.Item(id="rival", kind="paper", title="R", year=2024, phrase="opens d",
+                   covers={"d": .9}, depth_payoff=.9, cost_hours=1)
+    bad = S.check_prefix_optimal(spine, [opener, later, deepen, rival])
+    assert bad and "'rival'" in bad[0]

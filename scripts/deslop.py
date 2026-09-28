@@ -122,6 +122,32 @@ TICS = [
      "this skill's own house tic. Two per page reads as a verbal signature."),
 ]
 
+# ------------------------------------------------------- pointing, not naming
+
+# Two moves that both refuse to name the thing. They read as generated because a
+# writer who has the referent in mind tends to just say it.
+
+# 1. Demonstrative plus an abstract noun, pointing back at the previous sentence.
+#    "The sun is a star. It is that reason which allows us to see daylight."
+#    The referent is never named, so the reader has to carry it forward unaided.
+BACKREF_NOUNS = (
+    "condition|reason|fact|point|question|issue|problem|observation|insight|"
+    "distinction|property|result|outcome|effect|tension|gap|phenomenon|dynamic|"
+    "pattern|move|choice|decision|constraint|tradeoff|trade-off|number|claim|"
+    "argument|idea|assumption|consequence|implication|quantity|answer|shape|"
+    "ratio|mapping|relationship|behaviour|behavior|detail|mechanism|regime"
+)
+BACKREF = re.compile(rf"\b(?:that|this|these|those)\s+(?:{BACKREF_NOUNS})\b", re.I)
+BACKREF_BUDGET = 1.0   # per 1000 words
+
+# 2. The whole sentence is a re-label: demonstrative subject, linking verb, and a
+#    noun phrase renaming what was just said. "That condition is a claim about
+#    sharing." It adds nothing; the previous sentence already said it.
+RELABEL = re.compile(
+    r"^(?:that|this|it|these|those)\b[^.]{0,40}\b(?:is|are|was|were|becomes|remains)\b",
+    re.I)
+RELABEL_BUDGET = 1.0   # per 1000 words
+
 REPEATED_OPENERS = 3   # the same first two words starting N+ sentences
 
 
@@ -139,6 +165,31 @@ def check_prose(text: str) -> list[Finding]:
                            (WARN if over else OK),
                            f"{len(hits)} found, {rate:.1f} per 1000 words, "
                            f"budget {budget:g}", [], why))
+
+    # Pointing back at a previous sentence instead of naming what it said.
+    back = BACKREF.findall(text)
+    if back:
+        rate = len(back) * per_k
+        over = rate > BACKREF_BUDGET + 1e-9
+        out.append(Finding(
+            "back-reference names nothing", WARN if over else OK,
+            f"{len(back)} found, {rate:.1f} per 1000 words, budget {BACKREF_BUDGET:g}",
+            [], "'that condition', 'this reason'. Name the thing instead of "
+                "pointing at it; if it cannot be named in a word, the sentence "
+                "before it did not land."))
+
+    # Sentences that exist only to rename the previous sentence.
+    relabels = [t.strip() for t in re.split(r"(?<=[.!?])\s+", text)
+                if RELABEL.match(t.strip())]
+    if relabels:
+        rate = len(relabels) * per_k
+        over = rate > RELABEL_BUDGET + 1e-9
+        out.append(Finding(
+            "sentence re-labels the last one", WARN if over else OK,
+            f"{len(relabels)} found, {rate:.1f} per 1000 words, "
+            f"budget {RELABEL_BUDGET:g}; e.g. {relabels[0][:70]!r}",
+            [], "a short declarative that renames what was just said adds no "
+                "information. Fold it into the sentence that earns it, or cut it."))
 
     # Sentences that all start the same way are the clearest rhythm tell there is.
     starts = [" ".join(s.strip().split()[:2]).lower()

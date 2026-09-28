@@ -395,6 +395,20 @@ a.cnt.code { color: var(--open); text-decoration: none;
 a.cnt.code:hover { border-bottom-color: var(--open); }
 .leadmeta { display: flex; gap: .7rem; flex-wrap: wrap; margin: .2rem 0 .8rem; }
 
+/* --- method on every row, and the annotation one click away --------------- */
+.mth { font-size: .9rem; color: var(--ink-2); line-height: 1.45; margin: .15rem 0 0; }
+p.mth { font-size: 1rem; margin: 0 0 .8rem; }
+.spine li > .why { grid-column: 2 / -1; margin: .35rem 0 0; }
+.spine .why summary { font-size: .76rem; color: var(--ink-3); list-style: none;
+  cursor: pointer; }
+.spine .why summary::-webkit-details-marker { display: none; }
+.spine .why summary::before { content: "+ "; font-family: var(--mono, ui-monospace, monospace); }
+.spine .why[open] summary::before { content: "- "; }
+.why .wl { font-size: .9rem; margin: .5rem 0; max-width: 44rem; }
+.why .cond { margin: .6rem 0; }
+.why .thinking { border-left: 3px solid var(--open); padding: .5rem 0 .5rem .9rem;
+  margin: .6rem 0; background: var(--open-bg); font-size: .9rem; max-width: 44rem; }
+
 @media (max-width: 700px) {
   .spine li { grid-template-columns: 2.1rem 1fr; }
   .spine .hrs { grid-column: 2; flex-direction: row; gap: .5rem; margin-top: .2rem; }
@@ -529,13 +543,26 @@ def group_link(x: dict, groups: dict) -> str:
     return f'<a class="grp" href="#g-{e(g["slug"])}">{e(g.get("name", x["group"]))}</a>'
 
 
+def when(x: dict) -> str:
+    """The date a reader sees: `date` ("Oct 2025") where the run has one, else the year.
+
+    A reader deciding whether a paper is current wants the month for anything from
+    the last two years. A year alone puts a January paper and a December paper side
+    by side as though they were the same age.
+    """
+    d = x.get("date") or x.get("year")
+    return f'<span class="yr">{e(d)}</span>' if d else ""
+
+
 def entry(x: dict, groups: dict, cls: str, tag: str) -> str:
     parts = [chips(x)]
     parts.append(f'<{tag}><a href="{e(x.get("url"))}">{e(x.get("title"))}</a></{tag}>')
-    if counts(x):
-        parts.append(f'<p class="meta leadmeta">{counts(x)}</p>')
+    if counts(x) or when(x):
+        parts.append(f'<p class="meta leadmeta">{when(x)}{counts(x)}</p>')
     if x.get("phrase"):
         parts.append(f'<p class="phlead">{e(x["phrase"])}</p>')
+    if x.get("method"):
+        parts.append(f'<p class="mth">{md(x["method"])}</p>')
     if x.get("conditioning"):
         parts.append(f'<p class="cond">{md(x["conditioning"])}</p>')
     if x.get("summary"):
@@ -594,22 +621,53 @@ def row(x: dict, groups: dict, *, sub: bool = False, cum: float | None = None) -
     three tonight" without arithmetic, which no single per-row duration does.
     """
     num = x.get("number") or x.get("position")
-    yr = f'<span class="yr">{e(x["year"])}</span>' if x.get("year") else ""
+    yr = when(x)
     role = (chip(x["role"], "role", "seminal" if x["role"] == "seminal" else "")
             if x.get("role") else "")
     live = (chip(x["liveness"], x["liveness"])
             if x.get("liveness") in ("dormant", "abandoned") else "")
     cumtxt = (f'<span class="cum">{cum:g}h</span>' if cum is not None else "")
+    mth = f'<span class="mth">{md(x["method"])}</span>' if x.get("method") else ""
     return (f'<li id="e-{e(x.get("id"))}" data-track="{e(x.get("kind"))}" '
             f'data-id="{e(x.get("id"))}"{" data-sub=1" if sub else ""}>'
             f'<button class="tick" aria-label="mark done"></button>'
             f'<span class="n">{e(num)}</span>'
             f'<span class="t"><span class="ph">{e(x.get("phrase"))}</span>'
-            f'<a class="ti" href="{e(x.get("url"))}">{e(x.get("title"))}</a>'
+            f'<a class="ti" href="{e(x.get("url"))}">{e(x.get("title"))}</a>{mth}'
             f'<span class="meta">{yr}{role}{live}{counts(x)}'
             f'{group_link(x, groups)}</span></span>'
             f'<span class="hrs">{e(x.get("time"))}{cumtxt}</span>'
+            f'{why(x)}'
             f'</li>{sub_rows(x, groups) if not sub else ""}')
+
+
+def why(x: dict) -> str:
+    """Layers one to three and the conditioning note for a row, one click away.
+
+    Before this, every entry after position one carried its annotation only in the
+    folder: the page showed a phrase and a title, and the conditioning note that
+    page.md says must be visible was not rendered anywhere for rows. A reader who
+    asked what each paper actually does had to leave the page to find out. The
+    method line stays visible on the row; this holds the rest.
+    """
+    bits = []
+    if x.get("conditioning"):
+        bits.append(f'<p class="cond">{md(x["conditioning"])}</p>')
+    if x.get("summary"):
+        bits.append(f'<p class="wl">{md(x["summary"])}</p>')
+    if x.get("unlocks"):
+        bits.append(f'<p class="wl">{md(x["unlocks"])}</p>')
+    if x.get("where_the_thinking_is"):
+        q = f'<p class="qn">{md(x["question"])}</p>' if x.get("question") else ""
+        bits.append(f'<div class="thinking">{md(x["where_the_thinking_is"])}{q}</div>')
+    if x.get("objection"):
+        bits.append(f'<p class="wl">The objection: {md(x["objection"])}</p>')
+    if x.get("skip"):
+        bits.append(f'<p class="wl">Skip: {md(x["skip"])}</p>')
+    if not bits:
+        return ""
+    return (f'<details class="why"><summary>why here, and where the thinking is'
+            f'</summary>{"".join(bits)}</details>')
 
 
 def stack(d: dict) -> str:

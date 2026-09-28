@@ -204,6 +204,18 @@ It cannot tell you that a heading inherited the wrong identity from a shared rul
 filter silently does nothing, and both of those shipped. Publishing to a scratch artifact and
 reading it is part of the build, not a courtesy.
 
+**The published page is a review a person reads, not the run's working view.** `report.html`
+from `build_page.py` is for checking the run. Its where-the-thinking-is notes, file and function
+names, table numbers and conditioning lines read to a person as machine notes, and a reader
+rejected exactly that page. Publish a page that opens with an "In one minute" summary, uses very
+direct headings, shows the field's few approaches through one small made-up example and a tabbed
+switcher that asks every approach the same questions, states the evidence as full-sentence
+bullets with their numbers, and gives each path entry its date, citations or stars, and three
+plain bullets: what it shows, how it works, why read it. Keep the order the selection produced.
+Everything finer stays in the folder, named once at the bottom. The rules are in the
+`presentation` guideline, and until `build_page.py` renders this shape, the page is written from
+`path.json` following the worked example linked there.
+
 Publish with `Artifact` yourself, reusing the same file path for the same
 topic so a re-run redeploys rather than minting a new link. Record the URL in `run.json`.
 

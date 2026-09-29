@@ -79,3 +79,14 @@ def test_a_clean_page_passes_end_to_end():
                       "conditioning": "Position one because it refuses the question."}],
          "groups": []}
     assert D.report(D.deslop(d)) == 0
+
+
+def test_a_markdown_page_is_checked_as_prose():
+    title, prose = D.from_markdown(
+        "---\nname: x\n---\n"
+        "# World models, after the score stops meaning anything\n\n"
+        "The **model** is bad, and [planning](https://example.com) works anyway.\n\n"
+        "```\nrather than rather than rather than\n```\n"
+        "| a | b |\n")
+    assert D.check_title(title).status == D.FAIL
+    assert prose == "The model is bad, and planning works anyway."

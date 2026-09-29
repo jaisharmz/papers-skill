@@ -237,6 +237,28 @@ def deslop(d: dict) -> list[Finding]:
     return [check_title(title)] + check_prose(prose)
 
 
+def from_markdown(text: str) -> tuple[str, str]:
+    """Title and prose of a markdown page: its first heading, and the sentences a
+    reader reads. Frontmatter, code, tables, comments and markup are not prose, and
+    counting them would spend the density budgets on words nobody reads as writing."""
+    text = re.sub(r"\A---\n.*?\n---\n", "", text, flags=re.S)
+    text = re.sub(r"```.*?```", " ", text, flags=re.S)
+    text = re.sub(r"<!--.*?-->", " ", text, flags=re.S)
+    title, prose = "", []
+    for line in text.splitlines():
+        s = line.strip()
+        if re.match(r"#{1,6}\s", s):
+            title = title or s.lstrip("#").strip()
+            continue
+        if not s or s.startswith("|") or set(s) <= set("-*_= "):
+            continue
+        s = re.sub(r"^(?:[-*+>]|\d+[.)])\s+", "", s)
+        s = re.sub(r"`[^`]*`", " ", s)
+        s = re.sub(r"!?\[([^\]]*)\]\([^)]*\)", r"\1", s)
+        prose.append(s.replace("**", "").replace("__", ""))
+    return title, " ".join(" ".join(prose).split())
+
+
 def report(findings) -> int:
     order = {FAIL: 0, WARN: 1, OK: 2}
     fails = 0
@@ -255,6 +277,12 @@ def report(findings) -> int:
 
 
 if __name__ == "__main__":
+    # A papers run (its folder or its path.json), or any markdown page.
     run = pathlib.Path(sys.argv[1]).resolve()
     p = run / "path.json" if run.is_dir() else run
-    sys.exit(1 if report(deslop(json.loads(p.read_text()))) else 0)
+    if p.suffix == ".json":
+        findings = deslop(json.loads(p.read_text()))
+    else:
+        title, prose = from_markdown(p.read_text())
+        findings = [check_title(title)] + check_prose(prose)
+    sys.exit(1 if report(findings) else 0)

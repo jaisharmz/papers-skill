@@ -120,6 +120,12 @@ TICS = [
      "'not just X but Y'", "the escalation shape voice.md bans as binary contrast."),
     (r"\bdoing the work\b", 1.0, "'doing the work'",
      "this skill's own house tic. Two per page reads as a verbal signature."),
+    (r"\w,\s+(?:not|never)\s+(?:as|a|an|the|its|their|by|in|on|for|from|with|just|only)\b", 0.5,
+     "'X, not Y'", "contrast by negation: the claim is defined by what it is not. The operator "
+     "named it as AI on sight. State the positive claim."),
+    (r"\b(?:comes?|came) for free\b|\bis free\b|\bat no (?:extra )?cost\b", 0.0, "'comes for free'",
+     "a stock phrase the operator marked as AI. Say what it costs or saves."),
+    (r"—|(?<!-)---(?!-)", 0.0, "em dash", "the operator never uses em dashes. Use a comma, a colon or two sentences."),
 ]
 
 # ------------------------------------------------------- pointing, not naming

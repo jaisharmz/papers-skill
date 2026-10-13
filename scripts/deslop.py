@@ -128,6 +128,8 @@ TICS = [
     (r"—|(?<!-)---(?!-)", 0.0, "em dash", "the operator never uses em dashes. Use a comma, a colon or two sentences."),
     (r"\bowns\b|\bowned by\b|\bowner of\b|\bhas an owner\b", 0.0, "ownership metaphor",
      "'the database owns reported numbers', 'the framework owns the code'. The operator marked it as AI. Say where the thing comes from."),
+    (r"\bwhere (?:the|its|their|this|that) \w+(?: \w+)? (?:comes?|came) from\b|\b(?:most|much|all) of the \w+ (?:comes?|came) from\b", 0.0,
+     "'where X comes from'", "'ablations show where the accuracy comes from'. The operator marked it as AI. State the finding."),
     (r"\brests on (?:one|a single|a simple) idea\b|\bthe key insight\b|\bthe core idea\b", 0.0, "announced idea",
      "'the design rests on one idea'. The operator marked it as AI. State the idea."),
     (r"\b95\s?% (?:confidence )?interval\b|\bstatistically significant\b|\bp\s?[<=]\s?0?\.\d", 0.5, "statistics in prose",

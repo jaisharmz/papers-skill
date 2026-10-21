@@ -136,6 +136,9 @@ TICS = [
      "'the claim lives in uses per cup'. The operator marked it as AI. Say the plain relation: 'the claim depends on uses per cup'."),
     (r"\brests on (?:one|a single|a simple) idea\b|\bthe key insight\b|\bthe core idea\b", 0.0, "announced idea",
      "'the design rests on one idea'. The operator marked it as AI. State the idea."),
+    (r"\b[a-z]+(?:-[a-z]+){2,}\b", 1.0, "stacked hyphens",
+     "'mutual-information-guided sampler'. The operator called overhyphenation a sign of slop: "
+     "write 'mutual information guided sampler', and keep chains only for fixed terms like 'offline-to-online'."),
     (r"\b95\s?% (?:confidence )?interval\b|\bstatistically significant\b|\bp\s?[<=]\s?0?\.\d", 0.5, "statistics in prose",
      "intervals and significance tests belong in tables and appendices. Prose gives the result simply, with just enough evidence."),
 ]

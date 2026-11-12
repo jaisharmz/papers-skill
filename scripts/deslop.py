@@ -141,6 +141,18 @@ TICS = [
      "write 'mutual information guided sampler', and keep chains only for fixed terms like 'offline-to-online'."),
     (r"\b95\s?% (?:confidence )?interval\b|\bstatistically significant\b|\bp\s?[<=]\s?0?\.\d", 0.5, "statistics in prose",
      "intervals and significance tests belong in tables and appendices. Prose gives the result simply, with just enough evidence."),
+    # added 2026-11-11 from a reader's 121 margin comments on two memos
+    (r"\b\d[\d,.]*\s+(?:[a-z]+\s+){0,2}?(?:an hour|a week|a day|a month|a year|a review|a task|a sign-off)\b"
+     r"|\$\d[\d,.]*[KMB]?\s+(?:an hour|a week|a day|a month|a year|a task)\b", 0.0, "rate written with 'a'",
+     "'2 hours a review', '$60 an hour'. The operator wants 'per' for every rate: 'replace with per, everywhere'."),
+    (r"§", 0.0, "section symbol", "the operator: 'avoid this symbol, change to paraphrasing instead of quoting'."),
+    (r"\bboth[.;!?)]", 0.5, "dangling 'both'",
+     "'since every task yields both' drew 'both what?'. Name the two things."),
+    (r",\s+so\s+(?!that\b|much\b|many\b|far\b|long\b)", 1.0, "', so' as a conjunction",
+     "the operator: 'avoid the FANBOYS so if possible'. Use 'since', 'as a result', or two sentences."),
+    (r"\bsigned-off\b|\bfine-tun\w*|\bre-(?:sort|order|run|write|check)\w*\b"
+     r"|\b\d+-(?:hour|task|week|day|page|minute|month|year|person|point)s?\b", 0.5, "needless hyphen",
+     "'50-task pilot', 'signed-off tasks', 'fine-tuning'. The operator: 'remove hyphen when not needed'."),
 ]
 
 # ------------------------------------------------------- pointing, not naming
